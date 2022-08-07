@@ -123,6 +123,8 @@ class VAE(BaseModuleClass):
         self.n_labels = n_labels
         self.latent_distribution = latent_distribution
         self.encode_covariates = encode_covariates
+        
+        self.sample_latent_on_forward = True
 
         self.use_size_factor_key = use_size_factor_key
         self.use_observed_lib_size = use_size_factor_key or use_observed_lib_size
@@ -223,7 +225,11 @@ class VAE(BaseModuleClass):
         return input_dict
 
     def _get_generative_input(self, tensors, inference_outputs):
-        z = inference_outputs["z"]
+        if self.sample_latent_on_forward:
+            z = inference_outputs["z"]
+        else:
+            qz = inference_outputs["qz"]
+            z = qz.mean
         library = inference_outputs["library"]
         batch_index = tensors[REGISTRY_KEYS.BATCH_KEY]
         y = tensors[REGISTRY_KEYS.LABELS_KEY]

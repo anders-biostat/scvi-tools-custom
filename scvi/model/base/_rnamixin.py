@@ -44,6 +44,7 @@ class RNASeqMixin:
         n_samples_overall: int = None,
         batch_size: Optional[int] = None,
         return_mean: bool = True,
+        use_latent_mean: bool = False,
         return_numpy: Optional[bool] = None,
     ) -> Union[np.ndarray, pd.DataFrame]:
         r"""
@@ -88,6 +89,11 @@ class RNASeqMixin:
         If `n_samples` > 1 and `return_mean` is False, then the shape is `(samples, cells, genes)`.
         Otherwise, shape is `(cells, genes)`. In this case, return type is :class:`~pandas.DataFrame` unless `return_numpy` is True.
         """
+        
+        if use_latent_mean:
+            sample_latent_on_forward = self.module.sample_latent_on_forward
+            self.module.sample_latent_on_forward = False
+        
         adata = self._validate_anndata(adata)
         if indices is None:
             indices = np.arange(adata.n_obs)
@@ -149,6 +155,9 @@ class RNASeqMixin:
             exprs = np.concatenate(exprs, axis=0)
         if n_samples > 1 and return_mean:
             exprs = exprs.mean(0)
+        
+        if use_latent_mean:
+            self.module.sample_latent_on_forward = sample_latent_on_forward
 
         if return_numpy is None or return_numpy is False:
             return pd.DataFrame(
