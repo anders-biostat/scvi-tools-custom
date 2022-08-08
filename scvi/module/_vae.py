@@ -228,7 +228,6 @@ class VAE(BaseModuleClass):
         if self.sample_latent_on_forward:
             z = inference_outputs["z"]
         else:
-            print("Running without sampling the latent space.")
             qz = inference_outputs["qz"]
             z = qz.mean
         library = inference_outputs["library"]
