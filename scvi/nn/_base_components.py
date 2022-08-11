@@ -117,7 +117,7 @@ class FCLayers(nn.Module):
                                     n_in + cat_dim * self.inject_into_layer(i),
                                     n_out,
                                     bias=bias,
-                                ) if i>0 and i<n_layers and n_in==n_out else None,
+                                ) if i>0 and i<n_layers-1 and n_in==n_out else None,
                             ),
                         )
                         for i, (n_in, n_out) in enumerate(
