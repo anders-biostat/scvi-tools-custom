@@ -112,6 +112,7 @@ class VAE(BaseModuleClass):
         library_log_means: Optional[np.ndarray] = None,
         library_log_vars: Optional[np.ndarray] = None,
         var_activation: Optional[Callable] = None,
+        use_ResBlocks: bool = False,
     ):
         super().__init__()
         self.dispersion = dispersion
@@ -180,6 +181,7 @@ class VAE(BaseModuleClass):
             use_layer_norm=use_layer_norm_encoder,
             var_activation=var_activation,
             return_dist=True,
+            use_ResBlocks=use_ResBlocks,
         )
         # l encoder goes from n_input-dimensional data to 1-d library size
         self.l_encoder = Encoder(
@@ -207,6 +209,7 @@ class VAE(BaseModuleClass):
             use_batch_norm=use_batch_norm_decoder,
             use_layer_norm=use_layer_norm_decoder,
             scale_activation="softplus" if use_size_factor_key else "softmax",
+            use_ResBlocks=use_ResBlocks,
         )
 
     def _get_inference_input(self, tensors):

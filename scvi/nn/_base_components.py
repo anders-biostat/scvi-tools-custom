@@ -66,10 +66,12 @@ class FCLayers(nn.Module):
         use_activation: bool = True,
         bias: bool = True,
         inject_covariates: bool = True,
+        use_ResBlocks: bool = False,
         activation_fn: nn.Module = nn.ReLU,
     ):
         super().__init__()
         self.inject_covariates = inject_covariates
+        self.use_ResBlocks = use_ResBlocks
         layers_dim = [n_in] + (n_layers - 1) * [n_hidden] + [n_out]
 
         if n_cat_list is not None:
@@ -79,34 +81,80 @@ class FCLayers(nn.Module):
             self.n_cat_list = []
 
         cat_dim = sum(self.n_cat_list)
-        self.fc_layers = nn.Sequential(
-            collections.OrderedDict(
-                [
-                    (
-                        "Layer {}".format(i),
-                        nn.Sequential(
-                            nn.Linear(
-                                n_in + cat_dim * self.inject_into_layer(i),
-                                n_out,
-                                bias=bias,
+        if self.use_ResBlocks:
+            self.fc_layers = nn.Sequential(
+                collections.OrderedDict(
+                    [
+                        (
+                            "Layer {}".format(i),
+                            nn.Sequential(
+                                # non-default params come from defaults in original Tensorflow implementation
+                                nn.BatchNorm1d(n_out, momentum=0.01, eps=0.001)
+                                if use_batch_norm and i>0
+                                else None,
+                                nn.LayerNorm(n_out, elementwise_affine=False)
+                                if use_layer_norm and i>0
+                                else None,
+                                activation_fn() if use_activation and i>0 else None,
+                                nn.Dropout(p=dropout_rate) if dropout_rate > 0 and i>0 else None,
+                                ###### Normal Block
+                                nn.Linear(
+                                    n_in + cat_dim * self.inject_into_layer(i),
+                                    n_out,
+                                    bias=bias,
+                                ),
+                                # non-default params come from defaults in original Tensorflow implementation
+                                nn.BatchNorm1d(n_out, momentum=0.01, eps=0.001)
+                                if use_batch_norm
+                                else None,
+                                nn.LayerNorm(n_out, elementwise_affine=False)
+                                if use_layer_norm
+                                else None,
+                                activation_fn() if use_activation else None,
+                                nn.Dropout(p=dropout_rate) if dropout_rate > 0 else None,
+                                ######
+                                nn.Linear(
+                                    n_in + cat_dim * self.inject_into_layer(i),
+                                    n_out,
+                                    bias=bias,
+                                ) if and i>0 and i<n_layers and n_in==n_out else None,
                             ),
-                            # non-default params come from defaults in original Tensorflow implementation
-                            nn.BatchNorm1d(n_out, momentum=0.01, eps=0.001)
-                            if use_batch_norm
-                            else None,
-                            nn.LayerNorm(n_out, elementwise_affine=False)
-                            if use_layer_norm
-                            else None,
-                            activation_fn() if use_activation else None,
-                            nn.Dropout(p=dropout_rate) if dropout_rate > 0 else None,
-                        ),
-                    )
-                    for i, (n_in, n_out) in enumerate(
-                        zip(layers_dim[:-1], layers_dim[1:])
-                    )
-                ]
+                        )
+                        for i, (n_in, n_out) in enumerate(
+                            zip(layers_dim[:-1], layers_dim[1:])
+                        )
+                    ]
+                )
             )
-        )
+        else:
+            self.fc_layers = nn.Sequential(
+                collections.OrderedDict(
+                    [
+                        (
+                            "Layer {}".format(i),
+                            nn.Sequential(
+                                nn.Linear(
+                                    n_in + cat_dim * self.inject_into_layer(i),
+                                    n_out,
+                                    bias=bias,
+                                ),
+                                # non-default params come from defaults in original Tensorflow implementation
+                                nn.BatchNorm1d(n_out, momentum=0.01, eps=0.001)
+                                if use_batch_norm
+                                else None,
+                                nn.LayerNorm(n_out, elementwise_affine=False)
+                                if use_layer_norm
+                                else None,
+                                activation_fn() if use_activation else None,
+                                nn.Dropout(p=dropout_rate) if dropout_rate > 0 else None,
+                            ),
+                        )
+                        for i, (n_in, n_out) in enumerate(
+                            zip(layers_dim[:-1], layers_dim[1:])
+                        )
+                    ]
+                )
+            )
 
     def inject_into_layer(self, layer_num) -> bool:
         """Helper to determine if covariates should be injected."""
@@ -173,7 +221,8 @@ class FCLayers(nn.Module):
                     one_hot_cat = cat  # cat has already been one_hot encoded
                 one_hot_cat_list += [one_hot_cat]
         for i, layers in enumerate(self.fc_layers):
-            for layer in layers:
+            if self.use_ResBlocks: x_in = x # always save
+            for j, layer in enumerate(layers):
                 if layer is not None:
                     if isinstance(layer, nn.BatchNorm1d):
                         if x.dim() == 3:
@@ -195,6 +244,7 @@ class FCLayers(nn.Module):
                                 one_hot_cat_list_layer = one_hot_cat_list
                             x = torch.cat((x, *one_hot_cat_list_layer), dim=-1)
                         x = layer(x)
+            if self.use_ResBlocks and x.size()==x_in.size() and i>0 and i<len(self.fc_layers)-1: x += x_in # only add if same size etc.
         return x
 
 
@@ -247,6 +297,7 @@ class Encoder(nn.Module):
         var_eps: float = 1e-4,
         var_activation: Optional[Callable] = None,
         return_dist: bool = False,
+        use_ResBlocks: bool = False,
         **kwargs,
     ):
         super().__init__()
@@ -260,6 +311,7 @@ class Encoder(nn.Module):
             n_layers=n_layers,
             n_hidden=n_hidden,
             dropout_rate=dropout_rate,
+            use_ResBlocks=use_ResBlocks,
             **kwargs,
         )
         self.mean_encoder = nn.Linear(n_hidden, n_output)
@@ -348,6 +400,7 @@ class DecoderSCVI(nn.Module):
         use_batch_norm: bool = False,
         use_layer_norm: bool = False,
         scale_activation: Literal["softmax", "softplus"] = "softmax",
+        use_ResBlocks: bool = False,
     ):
         super().__init__()
         self.px_decoder = FCLayers(
@@ -360,6 +413,7 @@ class DecoderSCVI(nn.Module):
             inject_covariates=inject_covariates,
             use_batch_norm=use_batch_norm,
             use_layer_norm=use_layer_norm,
+            use_ResBlocks=use_ResBlocks,
         )
 
         # mean gamma
